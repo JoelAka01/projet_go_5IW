@@ -1,0 +1,10 @@
+services:
+  go:
+    build: .
+    user: go
+    working_dir: /home/go
+    tty: true
+    stdin_open: true
+    volumes:
+      
+.:/home/go
