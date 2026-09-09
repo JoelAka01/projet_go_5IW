@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 
 	// Le driver s'enregistre auprès de database/sql via son seul effet de
 	// bord (init()) ; il n'est jamais référencé directement, d'où l'alias
@@ -45,7 +47,7 @@ func New(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("store: échec de l'activation des clés étrangères: %w", err)
 	}
 
-	schema, err := os.ReadFile("migrations/schema.sql")
+	schema, err := os.ReadFile(schemaPath())
 	if err != nil {
 		db.Close()
 		return nil, fmt.Errorf("store: échec de lecture du schéma: %w", err)
@@ -57,6 +59,15 @@ func New(dbPath string) (*Store, error) {
 	}
 
 	return &Store{db: db}, nil
+}
+
+// schemaPath localise migrations/schema.sql relativement à ce fichier
+// source plutôt qu'au répertoire de travail courant : "go test" place le cwd
+// dans le répertoire du package (internal/store), pas à la racine du repo,
+// ce qui casserait un chemin relatif comme "migrations/schema.sql".
+func schemaPath() string {
+	_, thisFile, _, _ := runtime.Caller(0)
+	return filepath.Join(filepath.Dir(thisFile), "..", "..", "migrations", "schema.sql")
 }
 
 // Close ferme la connexion à la base de données.
