@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	// Le driver s'enregistre auprès de database/sql via son seul effet de
 	// bord (init()) ; il n'est jamais référencé directement, d'où l'alias
@@ -73,4 +74,12 @@ func schemaPath() string {
 // Close ferme la connexion à la base de données.
 func (s *Store) Close() error {
 	return s.db.Close()
+}
+
+// isUniqueConstraintErr détecte une violation de contrainte UNIQUE renvoyée
+// par le driver modernc.org/sqlite, dont le message contient "UNIQUE
+// constraint failed" (il n'expose pas de type d'erreur dédié comparable à
+// sqlite3.ErrConstraintUnique du driver CGO).
+func isUniqueConstraintErr(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
 }

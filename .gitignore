@@ -1,0 +1,35 @@
+# Binaries
+/bin/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go build/test artifacts
+*.test
+*.out
+
+# Go cache / mod cache
+/.cache/
+/go/pkg/mod/
+GOCACHE/
+GOPATH/
+
+# Env files
+.env
+.env.*
+
+# IDE / OS
+.DS_Store
+.idea/
+*.swp
+
+# Local dev overrides
+docker-compose.override.yml
+
+# Shell history / container-generated files
+.ash_history
+.bash_history
+.config/

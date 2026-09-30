@@ -23,3 +23,48 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+
+CREATE TABLE IF NOT EXISTS products (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT NOT NULL,
+    description     TEXT NOT NULL DEFAULT '',
+    category        TEXT NOT NULL DEFAULT '',
+    price_cents     INTEGER NOT NULL,
+    tax_rate_percent INTEGER NOT NULL DEFAULT 20,
+    stock           INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_products_name ON products(name);
+CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
+
+CREATE TABLE IF NOT EXISTS cart_items (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL,
+    product_id      INTEGER NOT NULL,
+    quantity        INTEGER NOT NULL,
+
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+    UNIQUE (user_id, product_id)
+);
+
+CREATE TABLE IF NOT EXISTS orders (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL,
+    total_cents     INTEGER NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'pending',
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS order_items (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id        INTEGER NOT NULL,
+    product_id      INTEGER NOT NULL,
+    quantity        INTEGER NOT NULL,
+    price_cents     INTEGER NOT NULL,
+
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+);

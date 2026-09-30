@@ -6,5 +6,4 @@ services:
     tty: true
     stdin_open: true
     volumes:
-      
-.:/home/go
+      - .:/home/go
