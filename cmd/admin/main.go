@@ -53,7 +53,12 @@ func main() {
 		fmt.Println("4. Voir toutes les commandes")
 		fmt.Println("5. Changer le statut d'une commande")
 		fmt.Println("6. Créer une commande pour un client")
-		fmt.Println("7. Quitter")
+		fmt.Println("7. Lister les utilisateurs")
+		fmt.Println("8. Créer un utilisateur")
+		fmt.Println("9. Modifier un utilisateur")
+		fmt.Println("10. Confirmer un compte")
+		fmt.Println("11. Supprimer un utilisateur")
+		fmt.Println("12. Quitter")
 		fmt.Print("> ")
 
 		if !scanner.Scan() {
@@ -73,6 +78,16 @@ func main() {
 		case "6":
 			createOrderForUser(s, scanner)
 		case "7":
+			listUsers(s)
+		case "8":
+			createUser(s, scanner)
+		case "9":
+			updateUser(s, scanner)
+		case "10":
+			confirmUser(s, scanner)
+		case "11":
+			deleteUser(s, scanner)
+		case "12":
 			return
 		default:
 			fmt.Println("Choix invalide")
@@ -254,4 +269,133 @@ func createOrderForUser(s *store.Store, scanner *bufio.Scanner) {
 		return
 	}
 	fmt.Printf("Commande #%d créée pour %s - total: %.2f€\n", order.ID, user.Email, float64(order.TotalCents)/100)
+}
+
+func listUsers(s *store.Store) {
+	users, err := s.ListUsers()
+	if err != nil {
+		fmt.Println("Erreur:", err)
+		return
+	}
+	for _, u := range users {
+		fmt.Printf("#%d %s - admin: %t - confirmé: %t\n", u.ID, u.Email, u.IsAdmin, u.Confirmed)
+	}
+}
+
+func createUser(s *store.Store, scanner *bufio.Scanner) {
+	fmt.Print("Email: ")
+	scanner.Scan()
+	email := strings.TrimSpace(strings.ToLower(scanner.Text()))
+
+	fmt.Print("Mot de passe: ")
+	scanner.Scan()
+	password := strings.TrimSpace(scanner.Text())
+
+	fmt.Print("Administrateur ? (o/N): ")
+	scanner.Scan()
+	isAdmin := strings.EqualFold(strings.TrimSpace(scanner.Text()), "o")
+
+	passwordHash, err := auth.HashPassword(password)
+	if err != nil {
+		fmt.Println("Erreur:", err)
+		return
+	}
+
+	u := &models.User{
+		Email:        email,
+		PasswordHash: passwordHash,
+		IsAdmin:      isAdmin,
+	}
+	if err := s.CreateUser(u); err != nil {
+		fmt.Println("Erreur:", err)
+		return
+	}
+	fmt.Printf("Utilisateur créé: #%d %s\n", u.ID, u.Email)
+}
+
+func updateUser(s *store.Store, scanner *bufio.Scanner) {
+	fmt.Print("ID de l'utilisateur à modifier: ")
+	scanner.Scan()
+	id, err := strconv.ParseInt(strings.TrimSpace(scanner.Text()), 10, 64)
+	if err != nil {
+		fmt.Println("ID invalide")
+		return
+	}
+
+	user, err := s.GetUserByID(id)
+	if err != nil {
+		fmt.Println("Erreur:", err)
+		return
+	}
+	fmt.Printf("Utilisateur #%d - %s - admin: %t\n", user.ID, user.Email, user.IsAdmin)
+
+	fmt.Printf("Nouvel email (vide pour garder %q): ", user.Email)
+	scanner.Scan()
+	if email := strings.TrimSpace(strings.ToLower(scanner.Text())); email != "" {
+		if err := s.UpdateUserEmail(id, email); err != nil {
+			fmt.Println("Erreur:", err)
+			return
+		}
+	}
+
+	fmt.Print("Nouveau mot de passe (vide pour ne pas changer): ")
+	scanner.Scan()
+	if password := strings.TrimSpace(scanner.Text()); password != "" {
+		passwordHash, err := auth.HashPassword(password)
+		if err != nil {
+			fmt.Println("Erreur:", err)
+			return
+		}
+		if err := s.UpdateUserPassword(id, passwordHash); err != nil {
+			fmt.Println("Erreur:", err)
+			return
+		}
+	}
+
+	fmt.Print("Changer le statut admin ? (o/n, vide pour ne pas changer): ")
+	scanner.Scan()
+	switch strings.ToLower(strings.TrimSpace(scanner.Text())) {
+	case "o":
+		if err := s.SetUserAdminByID(id, true); err != nil {
+			fmt.Println("Erreur:", err)
+			return
+		}
+	case "n":
+		if err := s.SetUserAdminByID(id, false); err != nil {
+			fmt.Println("Erreur:", err)
+			return
+		}
+	}
+
+	fmt.Println("Utilisateur mis à jour.")
+}
+
+func confirmUser(s *store.Store, scanner *bufio.Scanner) {
+	fmt.Print("ID de l'utilisateur à confirmer: ")
+	scanner.Scan()
+	id, err := strconv.ParseInt(strings.TrimSpace(scanner.Text()), 10, 64)
+	if err != nil {
+		fmt.Println("ID invalide")
+		return
+	}
+	if err := s.ConfirmUser(id); err != nil {
+		fmt.Println("Erreur:", err)
+		return
+	}
+	fmt.Println("Compte confirmé.")
+}
+
+func deleteUser(s *store.Store, scanner *bufio.Scanner) {
+	fmt.Print("ID de l'utilisateur à supprimer: ")
+	scanner.Scan()
+	id, err := strconv.ParseInt(strings.TrimSpace(scanner.Text()), 10, 64)
+	if err != nil {
+		fmt.Println("ID invalide")
+		return
+	}
+	if err := s.DeleteUser(id); err != nil {
+		fmt.Println("Erreur:", err)
+		return
+	}
+	fmt.Println("Utilisateur supprimé.")
 }

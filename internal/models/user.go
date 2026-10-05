@@ -5,4 +5,5 @@ type User struct {
 	Email        string
 	PasswordHash string
 	IsAdmin      bool
+	Confirmed    bool
 }
