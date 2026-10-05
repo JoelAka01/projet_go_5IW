@@ -51,7 +51,9 @@ func main() {
 		fmt.Println("2. Ajouter un produit")
 		fmt.Println("3. Supprimer un produit")
 		fmt.Println("4. Voir toutes les commandes")
-		fmt.Println("5. Quitter")
+		fmt.Println("5. Changer le statut d'une commande")
+		fmt.Println("6. Créer une commande pour un client")
+		fmt.Println("7. Quitter")
 		fmt.Print("> ")
 
 		if !scanner.Scan() {
@@ -67,6 +69,10 @@ func main() {
 		case "4":
 			listAllOrders(s)
 		case "5":
+			changeOrderStatus(s, scanner)
+		case "6":
+			createOrderForUser(s, scanner)
+		case "7":
 			return
 		default:
 			fmt.Println("Choix invalide")
@@ -156,4 +162,96 @@ func listAllOrders(s *store.Store) {
 	for _, o := range orders {
 		fmt.Printf("Commande #%d - utilisateur #%d - %.2f€ - %s\n", o.ID, o.UserID, float64(o.TotalCents)/100, o.Status)
 	}
+}
+
+func changeOrderStatus(s *store.Store, scanner *bufio.Scanner) {
+	fmt.Print("ID de la commande: ")
+	scanner.Scan()
+	orderID, err := strconv.ParseInt(strings.TrimSpace(scanner.Text()), 10, 64)
+	if err != nil {
+		fmt.Println("ID invalide")
+		return
+	}
+
+	order, err := s.GetOrder(orderID)
+	if err != nil {
+		fmt.Println("Erreur:", err)
+		return
+	}
+	fmt.Printf("Commande #%d - utilisateur #%d - statut actuel: %s\n", order.ID, order.UserID, order.Status)
+	fmt.Printf("Statuts possibles: %s\n", strings.Join(store.ValidOrderStatuses, ", "))
+	fmt.Print("Nouveau statut: ")
+	scanner.Scan()
+	status := strings.TrimSpace(scanner.Text())
+
+	if err := s.UpdateOrderStatus(orderID, status); err != nil {
+		fmt.Println("Erreur:", err)
+		return
+	}
+	fmt.Println("Statut mis à jour.")
+}
+
+func createOrderForUser(s *store.Store, scanner *bufio.Scanner) {
+	fmt.Print("Email du client: ")
+	scanner.Scan()
+	email := strings.TrimSpace(strings.ToLower(scanner.Text()))
+
+	user, err := s.GetUserByEmail(email)
+	if err != nil {
+		fmt.Println("Erreur:", err)
+		return
+	}
+
+	var items []models.OrderItem
+	var totalCents int64
+	for {
+		fmt.Print("ID du produit à ajouter (vide pour terminer): ")
+		scanner.Scan()
+		input := strings.TrimSpace(scanner.Text())
+		if input == "" {
+			break
+		}
+		productID, err := strconv.ParseInt(input, 10, 64)
+		if err != nil {
+			fmt.Println("ID invalide")
+			continue
+		}
+		product, err := s.GetProduct(productID)
+		if err != nil {
+			fmt.Println("Erreur:", err)
+			continue
+		}
+
+		fmt.Print("Quantité: ")
+		scanner.Scan()
+		quantity, err := strconv.Atoi(strings.TrimSpace(scanner.Text()))
+		if err != nil || quantity <= 0 {
+			fmt.Println("Quantité invalide")
+			continue
+		}
+
+		items = append(items, models.OrderItem{
+			ProductID:  product.ID,
+			Quantity:   quantity,
+			PriceCents: product.PriceCentsTTC(),
+		})
+		totalCents += product.PriceCentsTTC() * int64(quantity)
+		fmt.Printf("Produit ajouté: #%d %s x%d\n", product.ID, product.Name, quantity)
+	}
+
+	if len(items) == 0 {
+		fmt.Println("Aucun produit ajouté, commande annulée.")
+		return
+	}
+
+	order := &models.Order{
+		UserID:     user.ID,
+		Items:      items,
+		TotalCents: totalCents,
+	}
+	if err := s.CreateOrder(order); err != nil {
+		fmt.Println("Erreur:", err)
+		return
+	}
+	fmt.Printf("Commande #%d créée pour %s - total: %.2f€\n", order.ID, user.Email, float64(order.TotalCents)/100)
 }

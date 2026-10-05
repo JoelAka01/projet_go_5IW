@@ -21,6 +21,14 @@ Email: alice@example.com
 Mot de passe: MotDePasse123!
 ```
 
+Il n'y a pas d'identifiant admin par défaut. Pour obtenir un compte
+administrateur, créez d'abord un compte normal comme ci-dessus, puis
+promouvez-le avec la commande de seed :
+
+```bash
+go run ./cmd/seed make-admin alice@example.com
+```
+
 ## Exemple de panier
 
 Un panier sauvegardé possède un identifiant métier au format `BSK-XXXXXX`

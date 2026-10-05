@@ -1,10 +1,27 @@
 package store
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 
 	"ecommerce-cli/internal/models"
 )
+
+var ErrOrderNotFound = errors.New("store: commande introuvable")
+
+var ErrInvalidOrderStatus = errors.New("store: statut de commande invalide")
+
+var ValidOrderStatuses = []string{"pending", "paid", "shipped", "delivered", "cancelled"}
+
+func isValidOrderStatus(status string) bool {
+	for _, s := range ValidOrderStatuses {
+		if s == status {
+			return true
+		}
+	}
+	return false
+}
 
 func (s *Store) CreateOrder(o *models.Order) error {
 	tx, err := s.db.Begin()
@@ -95,10 +112,40 @@ func (s *Store) ListAllOrders() ([]models.Order, error) {
 	return orders, rows.Err()
 }
 
+func (s *Store) GetOrder(orderID int64) (*models.Order, error) {
+	var o models.Order
+	err := s.db.QueryRow(
+		`SELECT id, user_id, total_cents, status FROM orders WHERE id = ?`,
+		orderID,
+	).Scan(&o.ID, &o.UserID, &o.TotalCents, &o.Status)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrOrderNotFound
+		}
+		return nil, fmt.Errorf("store: échec de récupération de la commande: %w", err)
+	}
+	items, err := s.listOrderItems(o.ID)
+	if err != nil {
+		return nil, err
+	}
+	o.Items = items
+	return &o, nil
+}
+
 func (s *Store) UpdateOrderStatus(orderID int64, status string) error {
-	_, err := s.db.Exec(`UPDATE orders SET status = ? WHERE id = ?`, status, orderID)
+	if !isValidOrderStatus(status) {
+		return ErrInvalidOrderStatus
+	}
+	res, err := s.db.Exec(`UPDATE orders SET status = ? WHERE id = ?`, status, orderID)
 	if err != nil {
 		return fmt.Errorf("store: échec de mise à jour du statut: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: échec de vérification de la mise à jour: %w", err)
+	}
+	if affected == 0 {
+		return ErrOrderNotFound
 	}
 	return nil
 }

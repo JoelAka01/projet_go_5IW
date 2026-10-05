@@ -27,6 +27,21 @@ func (s *Store) GetUserByEmail(email string) (*models.User, error) {
 	return &u, nil
 }
 
+func (s *Store) GetUserByID(id int64) (*models.User, error) {
+	var u models.User
+	err := s.db.QueryRow(
+		`SELECT id, email, password_hash, is_admin FROM users WHERE id = ?`,
+		id,
+	).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.IsAdmin)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrUserNotFound
+		}
+		return nil, fmt.Errorf("store: échec de récupération de l'utilisateur: %w", err)
+	}
+	return &u, nil
+}
+
 func (s *Store) CreateUser(u *models.User) error {
 	res, err := s.db.Exec(
 		`INSERT INTO users (email, password_hash, is_admin, confirmed) VALUES (?, ?, ?, 1)`,
