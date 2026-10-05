@@ -1,12 +1,19 @@
 # ecommerce-cli
 
-Application e-commerce en ligne de commande (Go), 100% CLI :
+Application e-commerce en ligne de commande (Go) organisée en architecture
+client/serveur :
 
-- un **client CLI** pour les utilisateurs (`cmd/client`)
-- un **client CLI admin** pour la gestion (`cmd/admin`)
-- une commande utilitaire de **seed** (données de démo / promotion admin) (`cmd/seed`)
+- un **serveur HTTP** (`cmd/server`) qui expose l'API (JSON, `net/http` seul,
+  sans framework) et qui est le seul composant à accéder à la base de données
+- un **client CLI** pour les utilisateurs (`cmd/client`), 100% ligne de
+  commande, qui communique avec le serveur via `internal/apiclient`
+- un **client CLI admin** pour la gestion (`cmd/admin`), séparé du client
+  utilisateur, qui communique également avec le serveur via `internal/apiclient`
+- une commande utilitaire de **seed** (données de démo / promotion admin)
+  (`cmd/seed`), qui accède directement à la base (outil de développement)
 
-Il n'y a pas de serveur HTTP ni d'API réseau : chaque CLI accède directement à la base de données locale via le package `internal/store`.
+Les CLI client et admin ne communiquent jamais directement avec la base de
+données : toutes leurs actions passent par des requêtes HTTP vers `cmd/server`.
 
 La persistance se fait via **SQLite** (`modernc.org/sqlite`), aucune base externe n'est requise.
 
@@ -35,30 +42,39 @@ La persistance se fait via **SQLite** (`modernc.org/sqlite`), aucune base extern
    go run ./cmd/seed make-admin <email>
    ```
 
-3. Lancer le client CLI (utilisateur) :
+3. Démarrer le serveur HTTP (requis avant d'utiliser les CLI client/admin) :
+
+   ```bash
+   go run ./cmd/server
+   ```
+
+   Par défaut, le serveur utilise le fichier `ecommerce.db` (SQLite) à la
+   racine du projet et écoute sur `:8080`.
+
+4. Dans un autre terminal, lancer le client CLI (utilisateur) :
 
    ```bash
    go run ./cmd/client
    ```
 
-   Par défaut, la CLI utilise le fichier `ecommerce.db` (SQLite) à la racine du projet.
-
-4. Pour l'interface admin :
+5. Pour l'interface admin (dans un autre terminal également) :
    ```bash
    go run ./cmd/admin
    ```
 
 ### Variables d'environnement
 
-| Variable  | Utilisé par               | Défaut         | Description                      |
-| --------- | ------------------------- | -------------- | -------------------------------- |
-| `DB_PATH` | `client`, `admin`, `seed` | `ecommerce.db` | Chemin du fichier de base SQLite |
+| Variable      | Utilisé par                                 | Défaut                                            | Description                      |
+| ------------- | ------------------------------------------- | ------------------------------------------------- | -------------------------------- |
+| `DB_PATH`     | `server`, `seed`                            | `ecommerce.db`                                    | Chemin du fichier de base SQLite |
+| `SERVER_ADDR` | `server` (écoute), `client`/`admin` (cible) | `:8080` (serveur) / `http://localhost:8080` (CLI) | Adresse du serveur HTTP          |
 
-Exemple (pour que client et admin partagent la même base) :
+Exemple (serveur sur un port personnalisé, CLI pointant dessus) :
 
 ```bash
-DB_PATH=mabase.db go run ./cmd/client
-DB_PATH=mabase.db go run ./cmd/admin
+SERVER_ADDR=:9090 go run ./cmd/server
+SERVER_ADDR=http://localhost:9090 go run ./cmd/client
+SERVER_ADDR=http://localhost:9090 go run ./cmd/admin
 ```
 
 ## Lancer le projet avec Docker
@@ -69,7 +85,7 @@ Le `compose.yml` fourni monte le code source dans un conteneur Go et ouvre un sh
 docker compose run --rm go sh
 ```
 
-Une fois dans le conteneur, vous pouvez utiliser les mêmes commandes que ci-dessus (`go run ./cmd/client`, etc.).
+Une fois dans le conteneur, vous pouvez utiliser les mêmes commandes que ci-dessus (`go run ./cmd/server`, puis `go run ./cmd/client` / `go run ./cmd/admin` dans d'autres sessions).
 
 ## Tests
 

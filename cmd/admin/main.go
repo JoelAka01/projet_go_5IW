@@ -1,3 +1,6 @@
+// Application d'administration en ligne de commande, séparée de
+// l'application cliente. Communique exclusivement avec cmd/server via une
+// API HTTP (internal/apiclient).
 package main
 
 import (
@@ -7,24 +10,17 @@ import (
 	"strconv"
 	"strings"
 
-	"ecommerce-cli/internal/auth"
-	"ecommerce-cli/internal/models"
-	"ecommerce-cli/internal/store"
+	"ecommerce-cli/internal/api"
+	"ecommerce-cli/internal/apiclient"
 )
 
 func main() {
-	dbPath := os.Getenv("DB_PATH")
-	if dbPath == "" {
-		dbPath = "ecommerce.db"
+	serverAddr := os.Getenv("SERVER_ADDR")
+	if serverAddr == "" {
+		serverAddr = "http://localhost:8080"
 	}
 
-	s, err := store.New(dbPath)
-	if err != nil {
-		fmt.Println("Erreur d'ouverture de la base:", err)
-		os.Exit(1)
-	}
-	defer s.Close()
-
+	client := apiclient.New(serverAddr)
 	scanner := bufio.NewScanner(os.Stdin)
 
 	fmt.Print("Email admin: ")
@@ -34,16 +30,17 @@ func main() {
 	scanner.Scan()
 	password := strings.TrimSpace(scanner.Text())
 
-	user, err := s.GetUserByEmail(email)
-	if err != nil || !auth.CheckPassword(user.PasswordHash, password) {
+	resp, err := client.Login(email, password)
+	if err != nil {
 		fmt.Println("Identifiants invalides.")
 		os.Exit(1)
 	}
-	if !user.IsAdmin {
+	if !resp.User.IsAdmin {
 		fmt.Println("Ce compte n'est pas administrateur.")
 		os.Exit(1)
 	}
-	fmt.Printf("Connecté en tant qu'admin (%s)\n", user.Email)
+	client.SetToken(resp.Token)
+	fmt.Printf("Connecté en tant qu'admin (%s)\n", resp.User.Email)
 
 	for {
 		fmt.Println("\n--- Menu admin ---")
@@ -66,27 +63,27 @@ func main() {
 		}
 		switch strings.TrimSpace(scanner.Text()) {
 		case "1":
-			listProducts(s)
+			listProducts(client)
 		case "2":
-			addProduct(s, scanner)
+			addProduct(client, scanner)
 		case "3":
-			deleteProduct(s, scanner)
+			deleteProduct(client, scanner)
 		case "4":
-			listAllOrders(s)
+			listAllOrders(client)
 		case "5":
-			changeOrderStatus(s, scanner)
+			changeOrderStatus(client, scanner)
 		case "6":
-			createOrderForUser(s, scanner)
+			createOrderForUser(client, scanner)
 		case "7":
-			listUsers(s)
+			listUsers(client)
 		case "8":
-			createUser(s, scanner)
+			createUser(client, scanner)
 		case "9":
-			updateUser(s, scanner)
+			updateUser(client, scanner)
 		case "10":
-			confirmUser(s, scanner)
+			confirmUser(client, scanner)
 		case "11":
-			deleteUser(s, scanner)
+			deleteUser(client, scanner)
 		case "12":
 			return
 		default:
@@ -95,8 +92,8 @@ func main() {
 	}
 }
 
-func listProducts(s *store.Store) {
-	products, err := s.ListProducts()
+func listProducts(client *apiclient.Client) {
+	products, err := client.ListProducts()
 	if err != nil {
 		fmt.Println("Erreur:", err)
 		return
@@ -106,7 +103,7 @@ func listProducts(s *store.Store) {
 	}
 }
 
-func addProduct(s *store.Store, scanner *bufio.Scanner) {
+func addProduct(client *apiclient.Client, scanner *bufio.Scanner) {
 	fmt.Print("Nom: ")
 	scanner.Scan()
 	name := strings.TrimSpace(scanner.Text())
@@ -135,21 +132,21 @@ func addProduct(s *store.Store, scanner *bufio.Scanner) {
 		return
 	}
 
-	p := &models.Product{
+	p, err := client.CreateProduct(api.CreateProductRequest{
 		Name:        name,
 		Description: description,
 		Category:    category,
 		PriceCents:  int64(priceEuros * 100),
 		Stock:       stock,
-	}
-	if err := s.CreateProduct(p); err != nil {
+	})
+	if err != nil {
 		fmt.Println("Erreur:", err)
 		return
 	}
 	fmt.Printf("Produit créé: #%d [%s] %s\n", p.ID, p.Reference, p.Name)
 }
 
-func deleteProduct(s *store.Store, scanner *bufio.Scanner) {
+func deleteProduct(client *apiclient.Client, scanner *bufio.Scanner) {
 	fmt.Print("ID du produit à supprimer: ")
 	scanner.Scan()
 	id, err := strconv.ParseInt(strings.TrimSpace(scanner.Text()), 10, 64)
@@ -157,15 +154,15 @@ func deleteProduct(s *store.Store, scanner *bufio.Scanner) {
 		fmt.Println("ID invalide")
 		return
 	}
-	if err := s.DeleteProduct(id); err != nil {
+	if err := client.DeleteProduct(id); err != nil {
 		fmt.Println("Erreur:", err)
 		return
 	}
 	fmt.Println("Produit supprimé.")
 }
 
-func listAllOrders(s *store.Store) {
-	orders, err := s.ListAllOrders()
+func listAllOrders(client *apiclient.Client) {
+	orders, err := client.ListAllOrders()
 	if err != nil {
 		fmt.Println("Erreur:", err)
 		return
@@ -179,7 +176,7 @@ func listAllOrders(s *store.Store) {
 	}
 }
 
-func changeOrderStatus(s *store.Store, scanner *bufio.Scanner) {
+func changeOrderStatus(client *apiclient.Client, scanner *bufio.Scanner) {
 	fmt.Print("ID de la commande: ")
 	scanner.Scan()
 	orderID, err := strconv.ParseInt(strings.TrimSpace(scanner.Text()), 10, 64)
@@ -188,37 +185,23 @@ func changeOrderStatus(s *store.Store, scanner *bufio.Scanner) {
 		return
 	}
 
-	order, err := s.GetOrder(orderID)
-	if err != nil {
-		fmt.Println("Erreur:", err)
-		return
-	}
-	fmt.Printf("Commande #%d - utilisateur #%d - statut actuel: %s\n", order.ID, order.UserID, order.Status)
-	fmt.Printf("Statuts possibles: %s\n", strings.Join(store.ValidOrderStatuses, ", "))
-	fmt.Print("Nouveau statut: ")
+	fmt.Print("Nouveau statut (pending, paid, shipped, delivered, cancelled): ")
 	scanner.Scan()
 	status := strings.TrimSpace(scanner.Text())
 
-	if err := s.UpdateOrderStatus(orderID, status); err != nil {
+	if err := client.UpdateOrderStatus(orderID, status); err != nil {
 		fmt.Println("Erreur:", err)
 		return
 	}
 	fmt.Println("Statut mis à jour.")
 }
 
-func createOrderForUser(s *store.Store, scanner *bufio.Scanner) {
+func createOrderForUser(client *apiclient.Client, scanner *bufio.Scanner) {
 	fmt.Print("Email du client: ")
 	scanner.Scan()
 	email := strings.TrimSpace(strings.ToLower(scanner.Text()))
 
-	user, err := s.GetUserByEmail(email)
-	if err != nil {
-		fmt.Println("Erreur:", err)
-		return
-	}
-
-	var items []models.OrderItem
-	var totalCents int64
+	var items []api.CreateOrderItemRequest
 	for {
 		fmt.Print("ID du produit à ajouter (vide pour terminer): ")
 		scanner.Scan()
@@ -231,11 +214,6 @@ func createOrderForUser(s *store.Store, scanner *bufio.Scanner) {
 			fmt.Println("ID invalide")
 			continue
 		}
-		product, err := s.GetProduct(productID)
-		if err != nil {
-			fmt.Println("Erreur:", err)
-			continue
-		}
 
 		fmt.Print("Quantité: ")
 		scanner.Scan()
@@ -245,13 +223,8 @@ func createOrderForUser(s *store.Store, scanner *bufio.Scanner) {
 			continue
 		}
 
-		items = append(items, models.OrderItem{
-			ProductID:  product.ID,
-			Quantity:   quantity,
-			PriceCents: product.PriceCentsTTC(),
-		})
-		totalCents += product.PriceCentsTTC() * int64(quantity)
-		fmt.Printf("Produit ajouté: #%d %s x%d\n", product.ID, product.Name, quantity)
+		items = append(items, api.CreateOrderItemRequest{ProductID: productID, Quantity: quantity})
+		fmt.Printf("Produit #%d ajouté x%d\n", productID, quantity)
 	}
 
 	if len(items) == 0 {
@@ -259,20 +232,16 @@ func createOrderForUser(s *store.Store, scanner *bufio.Scanner) {
 		return
 	}
 
-	order := &models.Order{
-		UserID:     user.ID,
-		Items:      items,
-		TotalCents: totalCents,
-	}
-	if err := s.CreateOrder(order); err != nil {
+	order, err := client.CreateOrderForUser(api.CreateOrderRequest{Email: email, Items: items})
+	if err != nil {
 		fmt.Println("Erreur:", err)
 		return
 	}
-	fmt.Printf("Commande #%d créée pour %s - total: %.2f€\n", order.ID, user.Email, float64(order.TotalCents)/100)
+	fmt.Printf("Commande #%d créée pour %s - total: %.2f€\n", order.ID, email, float64(order.TotalCents)/100)
 }
 
-func listUsers(s *store.Store) {
-	users, err := s.ListUsers()
+func listUsers(client *apiclient.Client) {
+	users, err := client.ListUsers()
 	if err != nil {
 		fmt.Println("Erreur:", err)
 		return
@@ -282,7 +251,7 @@ func listUsers(s *store.Store) {
 	}
 }
 
-func createUser(s *store.Store, scanner *bufio.Scanner) {
+func createUser(client *apiclient.Client, scanner *bufio.Scanner) {
 	fmt.Print("Email: ")
 	scanner.Scan()
 	email := strings.TrimSpace(strings.ToLower(scanner.Text()))
@@ -295,25 +264,15 @@ func createUser(s *store.Store, scanner *bufio.Scanner) {
 	scanner.Scan()
 	isAdmin := strings.EqualFold(strings.TrimSpace(scanner.Text()), "o")
 
-	passwordHash, err := auth.HashPassword(password)
+	u, err := client.CreateUser(api.CreateUserRequest{Email: email, Password: password, IsAdmin: isAdmin})
 	if err != nil {
-		fmt.Println("Erreur:", err)
-		return
-	}
-
-	u := &models.User{
-		Email:        email,
-		PasswordHash: passwordHash,
-		IsAdmin:      isAdmin,
-	}
-	if err := s.CreateUser(u); err != nil {
 		fmt.Println("Erreur:", err)
 		return
 	}
 	fmt.Printf("Utilisateur créé: #%d %s\n", u.ID, u.Email)
 }
 
-func updateUser(s *store.Store, scanner *bufio.Scanner) {
+func updateUser(client *apiclient.Client, scanner *bufio.Scanner) {
 	fmt.Print("ID de l'utilisateur à modifier: ")
 	scanner.Scan()
 	id, err := strconv.ParseInt(strings.TrimSpace(scanner.Text()), 10, 64)
@@ -322,55 +281,39 @@ func updateUser(s *store.Store, scanner *bufio.Scanner) {
 		return
 	}
 
-	user, err := s.GetUserByID(id)
-	if err != nil {
-		fmt.Println("Erreur:", err)
-		return
-	}
-	fmt.Printf("Utilisateur #%d - %s - admin: %t\n", user.ID, user.Email, user.IsAdmin)
+	var req api.UpdateUserRequest
 
-	fmt.Printf("Nouvel email (vide pour garder %q): ", user.Email)
+	fmt.Print("Nouvel email (vide pour ne pas changer): ")
 	scanner.Scan()
 	if email := strings.TrimSpace(strings.ToLower(scanner.Text())); email != "" {
-		if err := s.UpdateUserEmail(id, email); err != nil {
-			fmt.Println("Erreur:", err)
-			return
-		}
+		req.Email = &email
 	}
 
 	fmt.Print("Nouveau mot de passe (vide pour ne pas changer): ")
 	scanner.Scan()
 	if password := strings.TrimSpace(scanner.Text()); password != "" {
-		passwordHash, err := auth.HashPassword(password)
-		if err != nil {
-			fmt.Println("Erreur:", err)
-			return
-		}
-		if err := s.UpdateUserPassword(id, passwordHash); err != nil {
-			fmt.Println("Erreur:", err)
-			return
-		}
+		req.Password = &password
 	}
 
 	fmt.Print("Changer le statut admin ? (o/n, vide pour ne pas changer): ")
 	scanner.Scan()
 	switch strings.ToLower(strings.TrimSpace(scanner.Text())) {
 	case "o":
-		if err := s.SetUserAdminByID(id, true); err != nil {
-			fmt.Println("Erreur:", err)
-			return
-		}
+		isAdmin := true
+		req.IsAdmin = &isAdmin
 	case "n":
-		if err := s.SetUserAdminByID(id, false); err != nil {
-			fmt.Println("Erreur:", err)
-			return
-		}
+		isAdmin := false
+		req.IsAdmin = &isAdmin
 	}
 
+	if _, err := client.UpdateUser(id, req); err != nil {
+		fmt.Println("Erreur:", err)
+		return
+	}
 	fmt.Println("Utilisateur mis à jour.")
 }
 
-func confirmUser(s *store.Store, scanner *bufio.Scanner) {
+func confirmUser(client *apiclient.Client, scanner *bufio.Scanner) {
 	fmt.Print("ID de l'utilisateur à confirmer: ")
 	scanner.Scan()
 	id, err := strconv.ParseInt(strings.TrimSpace(scanner.Text()), 10, 64)
@@ -378,14 +321,14 @@ func confirmUser(s *store.Store, scanner *bufio.Scanner) {
 		fmt.Println("ID invalide")
 		return
 	}
-	if err := s.ConfirmUser(id); err != nil {
+	if err := client.ConfirmUser(id); err != nil {
 		fmt.Println("Erreur:", err)
 		return
 	}
 	fmt.Println("Compte confirmé.")
 }
 
-func deleteUser(s *store.Store, scanner *bufio.Scanner) {
+func deleteUser(client *apiclient.Client, scanner *bufio.Scanner) {
 	fmt.Print("ID de l'utilisateur à supprimer: ")
 	scanner.Scan()
 	id, err := strconv.ParseInt(strings.TrimSpace(scanner.Text()), 10, 64)
@@ -393,7 +336,7 @@ func deleteUser(s *store.Store, scanner *bufio.Scanner) {
 		fmt.Println("ID invalide")
 		return
 	}
-	if err := s.DeleteUser(id); err != nil {
+	if err := client.DeleteUser(id); err != nil {
 		fmt.Println("Erreur:", err)
 		return
 	}

@@ -1,3 +1,6 @@
+// Application cliente en ligne de commande. Communique exclusivement avec
+// cmd/server via une API HTTP (internal/apiclient), elle n'accède jamais
+// directement à la base de données.
 package main
 
 import (
@@ -7,31 +10,23 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
-	"ecommerce-cli/internal/auth"
-	"ecommerce-cli/internal/models"
-	"ecommerce-cli/internal/store"
+	"ecommerce-cli/internal/api"
+	"ecommerce-cli/internal/apiclient"
 )
 
 func main() {
-	dbPath := os.Getenv("DB_PATH")
-	if dbPath == "" {
-		dbPath = "ecommerce.db"
+	serverAddr := os.Getenv("SERVER_ADDR")
+	if serverAddr == "" {
+		serverAddr = "http://localhost:8080"
 	}
 
-	s, err := store.New(dbPath)
-	if err != nil {
-		fmt.Println("Erreur d'ouverture de la base:", err)
-		os.Exit(1)
-	}
-	defer s.Close()
-
+	client := apiclient.New(serverAddr)
 	scanner := bufio.NewScanner(os.Stdin)
 
-	var user *models.User
+	var user *api.UserDTO
 	for user == nil {
-		user = authenticate(s, scanner)
+		user = authenticate(client, scanner)
 	}
 	fmt.Printf("Connecte en tant que %s\n", user.Email)
 
@@ -53,21 +48,21 @@ func main() {
 		}
 		switch strings.TrimSpace(scanner.Text()) {
 		case "1":
-			listProducts(s)
+			listProducts(client)
 		case "2":
-			showCart(s, user)
+			showCart(client)
 		case "3":
-			addToCart(s, user, scanner)
+			addToCart(client, scanner)
 		case "4":
-			updateCartItem(s, user, scanner)
+			updateCartItem(client, scanner)
 		case "5":
-			removeCartItem(s, user, scanner)
+			removeCartItem(client, scanner)
 		case "6":
-			checkout(s, user, scanner)
+			checkout(client, scanner)
 		case "7":
-			listOrders(s, user)
+			listOrders(client)
 		case "8":
-			searchProducts(s, scanner)
+			searchProducts(client, scanner)
 		case "9":
 			return
 		default:
@@ -76,7 +71,7 @@ func main() {
 	}
 }
 
-func authenticate(s *store.Store, scanner *bufio.Scanner) *models.User {
+func authenticate(client *apiclient.Client, scanner *bufio.Scanner) *api.UserDTO {
 	fmt.Println("1. Se connecter  2. Creer un compte")
 	fmt.Print("> ")
 	if !scanner.Scan() {
@@ -92,38 +87,31 @@ func authenticate(s *store.Store, scanner *bufio.Scanner) *models.User {
 	scanner.Scan()
 	password := strings.TrimSpace(scanner.Text())
 
+	var (
+		resp *api.AuthResponse
+		err  error
+	)
 	if choice == "2" {
-		hash, err := auth.HashPassword(password)
-		if err != nil {
+		resp, err = client.Register(email, password)
+	} else {
+		resp, err = client.Login(email, password)
+	}
+	if err != nil {
+		var apiErr *apiclient.APIError
+		if errors.As(err, &apiErr) {
+			fmt.Println(apiErr.Message)
+		} else {
 			fmt.Println("Erreur:", err)
-			return nil
 		}
-		u := &models.User{Email: email, PasswordHash: hash}
-		if err := s.CreateUser(u); err != nil {
-			if errors.Is(err, store.ErrUserExists) {
-				fmt.Println("Email deja utilise.")
-			} else {
-				fmt.Println("Erreur:", err)
-			}
-			return nil
-		}
-		return u
+		return nil
 	}
 
-	u, err := s.GetUserByEmail(email)
-	if err != nil {
-		fmt.Println("Identifiants invalides.")
-		return nil
-	}
-	if !auth.CheckPassword(u.PasswordHash, password) {
-		fmt.Println("Identifiants invalides.")
-		return nil
-	}
-	return u
+	client.SetToken(resp.Token)
+	return &resp.User
 }
 
-func listProducts(s *store.Store) {
-	products, err := s.ListProducts()
+func listProducts(client *apiclient.Client) {
+	products, err := client.ListProducts()
 	if err != nil {
 		fmt.Println("Erreur:", err)
 		return
@@ -133,11 +121,11 @@ func listProducts(s *store.Store) {
 		return
 	}
 	for _, p := range products {
-		fmt.Printf("#%d %s - %.2f euros (stock: %d)\n", p.ID, p.Name, float64(p.PriceCents)/100, p.Stock)
+		fmt.Printf("#%d [%s] %s - %.2f euros (stock: %d)\n", p.ID, p.Reference, p.Name, float64(p.PriceCents)/100, p.Stock)
 	}
 }
 
-func searchProducts(s *store.Store, scanner *bufio.Scanner) {
+func searchProducts(client *apiclient.Client, scanner *bufio.Scanner) {
 	fmt.Print("Recherche (nom, description, categorie ou prix): ")
 	if !scanner.Scan() {
 		return
@@ -148,7 +136,7 @@ func searchProducts(s *store.Store, scanner *bufio.Scanner) {
 		return
 	}
 
-	products, err := s.SearchProducts(query)
+	products, err := client.SearchProducts(query)
 	if err != nil {
 		fmt.Println("Erreur:", err)
 		return
@@ -159,12 +147,12 @@ func searchProducts(s *store.Store, scanner *bufio.Scanner) {
 	}
 	for _, p := range products {
 		fmt.Printf("#%d %s [%s] - %.2f HT / %.2f TTC - %s (stock: %d)\n",
-			p.ID, p.Name, p.Category, float64(p.PriceCents)/100, float64(p.PriceCentsTTC())/100, p.Description, p.Stock)
+			p.ID, p.Name, p.Category, float64(p.PriceCents)/100, float64(p.PriceCentsTTC)/100, p.Description, p.Stock)
 	}
 }
 
-func showCart(s *store.Store, user *models.User) {
-	cart, err := s.GetCartView(user.ID)
+func showCart(client *apiclient.Client) {
+	cart, err := client.GetCart()
 	if err != nil {
 		fmt.Println("Erreur:", err)
 		return
@@ -182,7 +170,7 @@ func showCart(s *store.Store, user *models.User) {
 	fmt.Printf("Total TTC: %.2f euros (livraison gratuite)\n", float64(cart.TotalCentsTTC)/100)
 }
 
-func addToCart(s *store.Store, user *models.User, scanner *bufio.Scanner) {
+func addToCart(client *apiclient.Client, scanner *bufio.Scanner) {
 	fmt.Print("ID du produit: ")
 	scanner.Scan()
 	id, err := strconv.ParseInt(strings.TrimSpace(scanner.Text()), 10, 64)
@@ -199,14 +187,14 @@ func addToCart(s *store.Store, user *models.User, scanner *bufio.Scanner) {
 		return
 	}
 
-	if err := s.AddCartItem(user.ID, id, qty); err != nil {
+	if err := client.AddCartItem(id, qty); err != nil {
 		fmt.Println("Erreur:", err)
 		return
 	}
 	fmt.Println("Ajoute au panier.")
 }
 
-func updateCartItem(s *store.Store, user *models.User, scanner *bufio.Scanner) {
+func updateCartItem(client *apiclient.Client, scanner *bufio.Scanner) {
 	fmt.Print("ID du produit: ")
 	scanner.Scan()
 	id, err := strconv.ParseInt(strings.TrimSpace(scanner.Text()), 10, 64)
@@ -223,14 +211,14 @@ func updateCartItem(s *store.Store, user *models.User, scanner *bufio.Scanner) {
 		return
 	}
 
-	if err := s.SetCartItemQuantity(user.ID, id, qty); err != nil {
+	if err := client.SetCartItemQuantity(id, qty); err != nil {
 		fmt.Println("Erreur:", err)
 		return
 	}
 	fmt.Println("Panier mis a jour.")
 }
 
-func removeCartItem(s *store.Store, user *models.User, scanner *bufio.Scanner) {
+func removeCartItem(client *apiclient.Client, scanner *bufio.Scanner) {
 	fmt.Print("ID du produit a retirer: ")
 	scanner.Scan()
 	id, err := strconv.ParseInt(strings.TrimSpace(scanner.Text()), 10, 64)
@@ -239,102 +227,55 @@ func removeCartItem(s *store.Store, user *models.User, scanner *bufio.Scanner) {
 		return
 	}
 
-	if err := s.RemoveCartItem(user.ID, id); err != nil {
+	if err := client.RemoveCartItem(id); err != nil {
 		fmt.Println("Erreur:", err)
 		return
 	}
 	fmt.Println("Produit retire du panier.")
 }
 
-func checkout(s *store.Store, user *models.User, scanner *bufio.Scanner) {
-	cart, err := s.GetCart(user.ID)
-	if err != nil {
-		fmt.Println("Erreur:", err)
-		return
-	}
-	if len(cart.Items) == 0 {
-		fmt.Println("Panier vide.")
-		return
-	}
-
-	cartRecord, err := s.GetOrCreateOpenCart(user.ID)
-	if err != nil {
-		fmt.Println("Erreur:", err)
-		return
-	}
-
-	order := &models.Order{UserID: user.ID, Status: "pending"}
-	for _, item := range cart.Items {
-		product, err := s.GetProduct(item.ProductID)
-		if err != nil {
-			fmt.Printf("Produit %d introuvable\n", item.ProductID)
-			return
-		}
-		order.Items = append(order.Items, models.OrderItem{
-			ProductID:  item.ProductID,
-			Quantity:   item.Quantity,
-			PriceCents: product.PriceCents,
-		})
-		order.TotalCents += product.PriceCents * int64(item.Quantity)
-	}
-
-	fmt.Printf("Paiement du panier %s - total: %.2f euros\n", cartRecord.Reference, float64(order.TotalCents)/100)
+func checkout(client *apiclient.Client, scanner *bufio.Scanner) {
 	card, err := readCardDetails(scanner)
 	if err != nil {
 		fmt.Println("Erreur:", err)
 		return
 	}
-	if err := card.Validate(time.Now()); err != nil {
-		fmt.Println("Paiement refuse:", err)
-		return
-	}
 
-	if err := s.CreateOrder(order); err != nil {
-		fmt.Println("Erreur:", err)
-		return
-	}
-	if err := s.RecordPayment(cartRecord.ID, order.ID, order.TotalCents, card.Last4()); err != nil {
-		fmt.Println("Erreur:", err)
-		return
-	}
-	if err := s.MarkCartPaid(cartRecord.ID); err != nil {
-		fmt.Println("Erreur:", err)
-		return
-	}
-	if err := s.SaveCart(&models.Cart{UserID: user.ID}); err != nil {
-		fmt.Println("Erreur:", err)
-		return
-	}
-
-	if _, err := s.GetOrCreateOpenCart(user.ID); err != nil {
-		fmt.Println("Erreur:", err)
+	resp, err := client.Checkout(card)
+	if err != nil {
+		var apiErr *apiclient.APIError
+		if errors.As(err, &apiErr) {
+			fmt.Println("Paiement refuse:", apiErr.Message)
+		} else {
+			fmt.Println("Erreur:", err)
+		}
 		return
 	}
 
 	fmt.Printf("Commande #%d creee (panier %s), total: %.2f euros, carte terminant par %s\n",
-		order.ID, cartRecord.Reference, float64(order.TotalCents)/100, card.Last4())
+		resp.Order.ID, resp.CartReference, float64(resp.Order.TotalCents)/100, resp.CardLast4)
 }
 
-func readCardDetails(scanner *bufio.Scanner) (models.CardDetails, error) {
+func readCardDetails(scanner *bufio.Scanner) (api.CardDetailsDTO, error) {
 	fmt.Print("Numero de carte: ")
 	if !scanner.Scan() {
-		return models.CardDetails{}, fmt.Errorf("saisie annulee")
+		return api.CardDetailsDTO{}, fmt.Errorf("saisie annulee")
 	}
 	number := strings.TrimSpace(scanner.Text())
 
 	fmt.Print("Date d'expiration (MM/AA): ")
 	if !scanner.Scan() {
-		return models.CardDetails{}, fmt.Errorf("saisie annulee")
+		return api.CardDetailsDTO{}, fmt.Errorf("saisie annulee")
 	}
 	expiry := strings.TrimSpace(scanner.Text())
 	parts := strings.SplitN(expiry, "/", 2)
 	if len(parts) != 2 {
-		return models.CardDetails{}, fmt.Errorf("format de date invalide, attendu MM/AA")
+		return api.CardDetailsDTO{}, fmt.Errorf("format de date invalide, attendu MM/AA")
 	}
 	month, errMonth := strconv.Atoi(strings.TrimSpace(parts[0]))
 	yearShort, errYear := strconv.Atoi(strings.TrimSpace(parts[1]))
 	if errMonth != nil || errYear != nil {
-		return models.CardDetails{}, fmt.Errorf("format de date invalide, attendu MM/AA")
+		return api.CardDetailsDTO{}, fmt.Errorf("format de date invalide, attendu MM/AA")
 	}
 	year := yearShort
 	if year < 100 {
@@ -343,11 +284,11 @@ func readCardDetails(scanner *bufio.Scanner) (models.CardDetails, error) {
 
 	fmt.Print("CVC: ")
 	if !scanner.Scan() {
-		return models.CardDetails{}, fmt.Errorf("saisie annulee")
+		return api.CardDetailsDTO{}, fmt.Errorf("saisie annulee")
 	}
 	cvc := strings.TrimSpace(scanner.Text())
 
-	return models.CardDetails{
+	return api.CardDetailsDTO{
 		Number:   number,
 		ExpMonth: month,
 		ExpYear:  year,
@@ -355,8 +296,8 @@ func readCardDetails(scanner *bufio.Scanner) (models.CardDetails, error) {
 	}, nil
 }
 
-func listOrders(s *store.Store, user *models.User) {
-	orders, err := s.ListOrdersByUser(user.ID)
+func listOrders(client *apiclient.Client) {
+	orders, err := client.ListMyOrders()
 	if err != nil {
 		fmt.Println("Erreur:", err)
 		return
