@@ -48,6 +48,25 @@ CREATE TABLE IF NOT EXISTS cart_items (
     UNIQUE (user_id, product_id)
 );
 
+-- Un panier "métier" identifié par une référence lisible (ex: BSK-1KH8E7),
+-- distinct des lignes de cart_items (qui restent indexées par user_id pour
+-- ne pas casser le fonctionnement existant). Un seul panier est "open" à la
+-- fois par utilisateur : c'est celui que l'on sauvegarde / que l'on paie.
+-- Une fois payé, son statut passe à 'paid' et un nouveau panier "open" est
+-- créé pour les achats suivants.
+CREATE TABLE IF NOT EXISTS carts (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL,
+    reference       TEXT NOT NULL UNIQUE,
+    status          TEXT NOT NULL DEFAULT 'open', -- open | paid
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    paid_at         DATETIME,
+
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_carts_user_status ON carts(user_id, status);
+
 CREATE TABLE IF NOT EXISTS orders (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id         INTEGER NOT NULL,
@@ -67,4 +86,19 @@ CREATE TABLE IF NOT EXISTS order_items (
 
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+);
+
+-- Trace du paiement d'un panier : aucune donnée bancaire sensible n'est
+-- stockée (ni numéro complet, ni CVC) conformément aux bonnes pratiques,
+-- seulement les 4 derniers chiffres de la carte à titre de justificatif.
+CREATE TABLE IF NOT EXISTS payments (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    cart_id         INTEGER NOT NULL,
+    order_id        INTEGER NOT NULL,
+    amount_cents    INTEGER NOT NULL,
+    card_last4      TEXT NOT NULL,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (cart_id) REFERENCES carts(id) ON DELETE CASCADE,
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
 );

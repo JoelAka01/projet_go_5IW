@@ -1,10 +1,93 @@
 package store
 
 import (
+	"crypto/rand"
+	"database/sql"
+	"errors"
 	"fmt"
 
 	"ecommerce-cli/internal/models"
 )
+
+var ErrCartNotFound = errors.New("store: panier introuvable")
+
+const cartReferenceAlphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+
+func generateCartReference() (string, error) {
+	buf := make([]byte, 6)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("store: échec de génération de la référence du panier: %w", err)
+	}
+	out := make([]byte, 6)
+	for i, b := range buf {
+		out[i] = cartReferenceAlphabet[int(b)%len(cartReferenceAlphabet)]
+	}
+	return "BSK-" + string(out), nil
+}
+
+type CartRecord struct {
+	ID        int64
+	UserID    int64
+	Reference string
+	Status    string
+}
+
+func (s *Store) GetOrCreateOpenCart(userID int64) (*CartRecord, error) {
+	row := s.db.QueryRow(
+		`SELECT id, user_id, reference, status FROM carts WHERE user_id = ? AND status = 'open'`,
+		userID,
+	)
+	var c CartRecord
+	err := row.Scan(&c.ID, &c.UserID, &c.Reference, &c.Status)
+	if err == nil {
+		return &c, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("store: échec de récupération du panier ouvert: %w", err)
+	}
+
+	reference, err := generateCartReference()
+	if err != nil {
+		return nil, err
+	}
+	res, err := s.db.Exec(
+		`INSERT INTO carts (user_id, reference, status) VALUES (?, ?, 'open')`,
+		userID, reference,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("store: échec de création du panier: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("store: échec de récupération de l'id du panier: %w", err)
+	}
+	return &CartRecord{ID: id, UserID: userID, Reference: reference, Status: "open"}, nil
+}
+
+func (s *Store) GetCartByReference(userID int64, reference string) (*CartRecord, error) {
+	row := s.db.QueryRow(
+		`SELECT id, user_id, reference, status FROM carts WHERE user_id = ? AND reference = ?`,
+		userID, reference,
+	)
+	var c CartRecord
+	if err := row.Scan(&c.ID, &c.UserID, &c.Reference, &c.Status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrCartNotFound
+		}
+		return nil, fmt.Errorf("store: échec de récupération du panier: %w", err)
+	}
+	return &c, nil
+}
+
+func (s *Store) MarkCartPaid(cartID int64) error {
+	if _, err := s.db.Exec(
+		`UPDATE carts SET status = 'paid', paid_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		cartID,
+	); err != nil {
+		return fmt.Errorf("store: échec de mise à jour du statut du panier: %w", err)
+	}
+	return nil
+}
 
 func (s *Store) GetCart(userID int64) (*models.Cart, error) {
 	rows, err := s.db.Query(
@@ -30,9 +113,6 @@ func (s *Store) GetCart(userID int64) (*models.Cart, error) {
 	return cart, nil
 }
 
-// SaveCart remplace intégralement le contenu du panier de c.UserID par
-// c.Items, dans une transaction : un panier n'est jamais laissé dans un état
-// partiellement mis à jour si une erreur survient en cours de route.
 func (s *Store) SaveCart(c *models.Cart) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -62,9 +142,6 @@ func (s *Store) SaveCart(c *models.Cart) error {
 	return nil
 }
 
-// AddCartItem ajoute delta unités du produit productID au panier de userID.
-// Si le produit est déjà présent, la quantité est incrémentée ; sinon une
-// nouvelle ligne est créée. delta doit être strictement positif.
 func (s *Store) AddCartItem(userID, productID int64, delta int) error {
 	if delta <= 0 {
 		return fmt.Errorf("store: la quantité à ajouter doit être positive")
@@ -80,8 +157,6 @@ func (s *Store) AddCartItem(userID, productID int64, delta int) error {
 	return nil
 }
 
-// SetCartItemQuantity fixe la quantité du produit productID dans le panier
-// de userID. Une quantité <= 0 supprime la ligne du panier.
 func (s *Store) SetCartItemQuantity(userID, productID int64, quantity int) error {
 	if quantity <= 0 {
 		return s.RemoveCartItem(userID, productID)
@@ -97,7 +172,6 @@ func (s *Store) SetCartItemQuantity(userID, productID int64, quantity int) error
 	return nil
 }
 
-// RemoveCartItem supprime le produit productID du panier de userID.
 func (s *Store) RemoveCartItem(userID, productID int64) error {
 	if _, err := s.db.Exec(
 		`DELETE FROM cart_items WHERE user_id = ? AND product_id = ?`,
@@ -108,10 +182,12 @@ func (s *Store) RemoveCartItem(userID, productID int64) error {
 	return nil
 }
 
-// GetCartView récupère le panier de userID enrichi des informations produit
-// (nom, prix HT/TTC) et calcule le total TTC du panier. Les lignes dont le
-// produit référencé n'existe plus sont ignorées.
 func (s *Store) GetCartView(userID int64) (*models.CartView, error) {
+	cartRecord, err := s.GetOrCreateOpenCart(userID)
+	if err != nil {
+		return nil, err
+	}
+
 	rows, err := s.db.Query(
 		`SELECT p.id, p.name, ci.quantity, p.price_cents, p.tax_rate_percent
 		 FROM cart_items ci
@@ -125,7 +201,7 @@ func (s *Store) GetCartView(userID int64) (*models.CartView, error) {
 	}
 	defer rows.Close()
 
-	view := &models.CartView{UserID: userID}
+	view := &models.CartView{UserID: userID, Reference: cartRecord.Reference}
 	for rows.Next() {
 		var (
 			item           models.CartItemView

@@ -1,5 +1,3 @@
-// Commande utilitaire de développement : passe un utilisateur en admin et
-// insère quelques produits de démonstration. Non destinée à la production.
 package main
 
 import (

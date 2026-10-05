@@ -12,8 +12,6 @@ import (
 	"ecommerce-cli/internal/store"
 )
 
-// Application 100% CLI : aucun serveur, aucun réseau. Toutes les opérations
-// passent directement par internal/store (accès à la base SQLite locale).
 func main() {
 	dbPath := os.Getenv("DB_PATH")
 	if dbPath == "" {

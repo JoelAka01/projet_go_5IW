@@ -6,8 +6,6 @@ import (
 	"ecommerce-cli/internal/models"
 )
 
-// CreateOrder insère une commande et ses lignes dans une transaction, puis
-// renseigne o.ID avec l'id généré.
 func (s *Store) CreateOrder(o *models.Order) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -79,8 +77,6 @@ func (s *Store) ListOrdersByUser(userID int64) ([]models.Order, error) {
 	return orders, nil
 }
 
-// ListAllOrders liste toutes les commandes, tous utilisateurs confondus
-// (utilisé par le CLI admin).
 func (s *Store) ListAllOrders() ([]models.Order, error) {
 	rows, err := s.db.Query(`SELECT id, user_id, total_cents, status FROM orders ORDER BY id DESC`)
 	if err != nil {
@@ -99,7 +95,6 @@ func (s *Store) ListAllOrders() ([]models.Order, error) {
 	return orders, rows.Err()
 }
 
-// UpdateOrderStatus modifie le statut d'une commande (utilisé par le CLI admin).
 func (s *Store) UpdateOrderStatus(orderID int64, status string) error {
 	_, err := s.db.Exec(`UPDATE orders SET status = ? WHERE id = ?`, status, orderID)
 	if err != nil {

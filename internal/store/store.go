@@ -8,35 +8,13 @@ import (
 	"runtime"
 	"strings"
 
-	// Le driver s'enregistre auprès de database/sql via son seul effet de
-	// bord (init()) ; il n'est jamais référencé directement, d'où l'alias
-	// vide. C'est un driver SQLite pur Go (aucune dépendance CGO), ce qui
-	// garde la compilation/déploiement simples (cf. Dockerfile sans gcc).
 	_ "modernc.org/sqlite"
 )
 
-// Store encapsule la connexion SQLite. Le champ db est volontairement non
-// exporté : toutes les requêtes SQL doivent passer par les méthodes de ce
-// package plutôt que par un accès direct à *sql.DB depuis l'extérieur, ce
-// qui centralise la gestion des erreurs et le mapping vers les types
-// métier (internal/models).
 type Store struct {
 	db *sql.DB
 }
 
-// New ouvre (ou crée) le fichier de base SQLite situé à dbPath et applique
-// le schéma décrit dans migrations/schema.sql.
-//
-// Pourquoi activer PRAGMA foreign_keys = ON explicitement : SQLite désactive
-// les contraintes de clé étrangère par défaut pour des raisons historiques
-// de compatibilité. Sans ce pragma, le "ON DELETE CASCADE" du schéma
-// (suppression des sessions quand un utilisateur est supprimé) ne serait
-// jamais appliqué.
-//
-// Pourquoi exécuter migrations/schema.sql directement plutôt qu'un outil de
-// migration dédié : les instructions du schéma utilisent "CREATE TABLE IF
-// NOT EXISTS", ce qui rend l'opération idempotente et suffisante pour une
-// application CLI sans framework.
 func New(dbPath string) (*Store, error) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -62,24 +40,15 @@ func New(dbPath string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
-// schemaPath localise migrations/schema.sql relativement à ce fichier
-// source plutôt qu'au répertoire de travail courant : "go test" place le cwd
-// dans le répertoire du package (internal/store), pas à la racine du repo,
-// ce qui casserait un chemin relatif comme "migrations/schema.sql".
 func schemaPath() string {
 	_, thisFile, _, _ := runtime.Caller(0)
 	return filepath.Join(filepath.Dir(thisFile), "..", "..", "migrations", "schema.sql")
 }
 
-// Close ferme la connexion à la base de données.
 func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-// isUniqueConstraintErr détecte une violation de contrainte UNIQUE renvoyée
-// par le driver modernc.org/sqlite, dont le message contient "UNIQUE
-// constraint failed" (il n'expose pas de type d'erreur dédié comparable à
-// sqlite3.ErrConstraintUnique du driver CGO).
 func isUniqueConstraintErr(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
 }

@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"ecommerce-cli/internal/auth"
 	"ecommerce-cli/internal/models"
@@ -62,7 +63,7 @@ func main() {
 		case "5":
 			removeCartItem(s, user, scanner)
 		case "6":
-			checkout(s, user)
+			checkout(s, user, scanner)
 		case "7":
 			listOrders(s, user)
 		case "8":
@@ -168,6 +169,7 @@ func showCart(s *store.Store, user *models.User) {
 		fmt.Println("Erreur:", err)
 		return
 	}
+	fmt.Printf("Panier %s\n", cart.Reference)
 	if len(cart.Items) == 0 {
 		fmt.Println("Panier vide.")
 		return
@@ -244,7 +246,7 @@ func removeCartItem(s *store.Store, user *models.User, scanner *bufio.Scanner) {
 	fmt.Println("Produit retire du panier.")
 }
 
-func checkout(s *store.Store, user *models.User) {
+func checkout(s *store.Store, user *models.User, scanner *bufio.Scanner) {
 	cart, err := s.GetCart(user.ID)
 	if err != nil {
 		fmt.Println("Erreur:", err)
@@ -252,6 +254,12 @@ func checkout(s *store.Store, user *models.User) {
 	}
 	if len(cart.Items) == 0 {
 		fmt.Println("Panier vide.")
+		return
+	}
+
+	cartRecord, err := s.GetOrCreateOpenCart(user.ID)
+	if err != nil {
+		fmt.Println("Erreur:", err)
 		return
 	}
 
@@ -270,7 +278,26 @@ func checkout(s *store.Store, user *models.User) {
 		order.TotalCents += product.PriceCents * int64(item.Quantity)
 	}
 
+	fmt.Printf("Paiement du panier %s - total: %.2f euros\n", cartRecord.Reference, float64(order.TotalCents)/100)
+	card, err := readCardDetails(scanner)
+	if err != nil {
+		fmt.Println("Erreur:", err)
+		return
+	}
+	if err := card.Validate(time.Now()); err != nil {
+		fmt.Println("Paiement refuse:", err)
+		return
+	}
+
 	if err := s.CreateOrder(order); err != nil {
+		fmt.Println("Erreur:", err)
+		return
+	}
+	if err := s.RecordPayment(cartRecord.ID, order.ID, order.TotalCents, card.Last4()); err != nil {
+		fmt.Println("Erreur:", err)
+		return
+	}
+	if err := s.MarkCartPaid(cartRecord.ID); err != nil {
 		fmt.Println("Erreur:", err)
 		return
 	}
@@ -279,7 +306,53 @@ func checkout(s *store.Store, user *models.User) {
 		return
 	}
 
-	fmt.Printf("Commande #%d creee, total: %.2f euros\n", order.ID, float64(order.TotalCents)/100)
+	if _, err := s.GetOrCreateOpenCart(user.ID); err != nil {
+		fmt.Println("Erreur:", err)
+		return
+	}
+
+	fmt.Printf("Commande #%d creee (panier %s), total: %.2f euros, carte terminant par %s\n",
+		order.ID, cartRecord.Reference, float64(order.TotalCents)/100, card.Last4())
+}
+
+func readCardDetails(scanner *bufio.Scanner) (models.CardDetails, error) {
+	fmt.Print("Numero de carte: ")
+	if !scanner.Scan() {
+		return models.CardDetails{}, fmt.Errorf("saisie annulee")
+	}
+	number := strings.TrimSpace(scanner.Text())
+
+	fmt.Print("Date d'expiration (MM/AA): ")
+	if !scanner.Scan() {
+		return models.CardDetails{}, fmt.Errorf("saisie annulee")
+	}
+	expiry := strings.TrimSpace(scanner.Text())
+	parts := strings.SplitN(expiry, "/", 2)
+	if len(parts) != 2 {
+		return models.CardDetails{}, fmt.Errorf("format de date invalide, attendu MM/AA")
+	}
+	month, errMonth := strconv.Atoi(strings.TrimSpace(parts[0]))
+	yearShort, errYear := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if errMonth != nil || errYear != nil {
+		return models.CardDetails{}, fmt.Errorf("format de date invalide, attendu MM/AA")
+	}
+	year := yearShort
+	if year < 100 {
+		year += 2000
+	}
+
+	fmt.Print("CVC: ")
+	if !scanner.Scan() {
+		return models.CardDetails{}, fmt.Errorf("saisie annulee")
+	}
+	cvc := strings.TrimSpace(scanner.Text())
+
+	return models.CardDetails{
+		Number:   number,
+		ExpMonth: month,
+		ExpYear:  year,
+		CVC:      cvc,
+	}, nil
 }
 
 func listOrders(s *store.Store, user *models.User) {
