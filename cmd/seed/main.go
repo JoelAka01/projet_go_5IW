@@ -41,6 +41,6 @@ func main() {
 			fmt.Println("erreur produit:", err)
 			continue
 		}
-		fmt.Printf("Produit créé: #%d %s\n", p.ID, p.Name)
+		fmt.Printf("Produit créé: #%d [%s] %s\n", p.ID, p.Reference, p.Name)
 	}
 }

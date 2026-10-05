@@ -2,6 +2,7 @@ package models
 
 type Product struct {
 	ID             int64
+	Reference      string
 	Name           string
 	Description    string
 	Category       string

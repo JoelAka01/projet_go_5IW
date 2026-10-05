@@ -102,7 +102,7 @@ func listProducts(s *store.Store) {
 		return
 	}
 	for _, p := range products {
-		fmt.Printf("#%d %s - %.2f€ (stock: %d)\n", p.ID, p.Name, float64(p.PriceCents)/100, p.Stock)
+		fmt.Printf("#%d [%s] %s - %.2f€ (stock: %d)\n", p.ID, p.Reference, p.Name, float64(p.PriceCents)/100, p.Stock)
 	}
 }
 
@@ -146,7 +146,7 @@ func addProduct(s *store.Store, scanner *bufio.Scanner) {
 		fmt.Println("Erreur:", err)
 		return
 	}
-	fmt.Printf("Produit créé: #%d %s\n", p.ID, p.Name)
+	fmt.Printf("Produit créé: #%d [%s] %s\n", p.ID, p.Reference, p.Name)
 }
 
 func deleteProduct(s *store.Store, scanner *bufio.Scanner) {

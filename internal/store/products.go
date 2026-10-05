@@ -1,6 +1,7 @@
 package store
 
 import (
+	"crypto/rand"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -12,8 +13,22 @@ import (
 
 var ErrProductNotFound = errors.New("store: produit introuvable")
 
+const productReferenceAlphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+
+func generateProductReference() (string, error) {
+	buf := make([]byte, 6)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("store: échec de génération de la référence du produit: %w", err)
+	}
+	out := make([]byte, 6)
+	for i, b := range buf {
+		out[i] = productReferenceAlphabet[int(b)%len(productReferenceAlphabet)]
+	}
+	return "PDT-" + string(out), nil
+}
+
 func (s *Store) ListProducts() ([]models.Product, error) {
-	rows, err := s.db.Query(`SELECT id, name, description, category, price_cents, tax_rate_percent, stock FROM products ORDER BY id`)
+	rows, err := s.db.Query(`SELECT id, reference, name, description, category, price_cents, tax_rate_percent, stock FROM products ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("store: échec du listage des produits: %w", err)
 	}
@@ -22,7 +37,7 @@ func (s *Store) ListProducts() ([]models.Product, error) {
 	var products []models.Product
 	for rows.Next() {
 		var p models.Product
-		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.Category, &p.PriceCents, &p.TaxRatePercent, &p.Stock); err != nil {
+		if err := rows.Scan(&p.ID, &p.Reference, &p.Name, &p.Description, &p.Category, &p.PriceCents, &p.TaxRatePercent, &p.Stock); err != nil {
 			return nil, fmt.Errorf("store: échec de lecture d'un produit: %w", err)
 		}
 		products = append(products, p)
@@ -42,15 +57,16 @@ func (s *Store) SearchProducts(query string) ([]models.Product, error) {
 	}
 
 	rows, err := s.db.Query(
-		`SELECT id, name, description, category, price_cents, tax_rate_percent, stock
+		`SELECT id, reference, name, description, category, price_cents, tax_rate_percent, stock
 		 FROM products
 		 WHERE LOWER(name) LIKE ?
 		    OR LOWER(description) LIKE ?
 		    OR LOWER(category) LIKE ?
+		    OR LOWER(reference) LIKE ?
 		    OR price_cents = ?
 		    OR (price_cents * (100 + tax_rate_percent) / 100) = ?
 		 ORDER BY id`,
-		like, like, like, priceCents, priceCents,
+		like, like, like, like, priceCents, priceCents,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("store: échec de la recherche de produits: %w", err)
@@ -60,7 +76,7 @@ func (s *Store) SearchProducts(query string) ([]models.Product, error) {
 	var products []models.Product
 	for rows.Next() {
 		var p models.Product
-		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.Category, &p.PriceCents, &p.TaxRatePercent, &p.Stock); err != nil {
+		if err := rows.Scan(&p.ID, &p.Reference, &p.Name, &p.Description, &p.Category, &p.PriceCents, &p.TaxRatePercent, &p.Stock); err != nil {
 			return nil, fmt.Errorf("store: échec de lecture d'un produit: %w", err)
 		}
 		products = append(products, p)
@@ -74,8 +90,8 @@ func (s *Store) SearchProducts(query string) ([]models.Product, error) {
 func (s *Store) GetProduct(id int64) (*models.Product, error) {
 	var p models.Product
 	err := s.db.QueryRow(
-		`SELECT id, name, description, category, price_cents, tax_rate_percent, stock FROM products WHERE id = ?`, id,
-	).Scan(&p.ID, &p.Name, &p.Description, &p.Category, &p.PriceCents, &p.TaxRatePercent, &p.Stock)
+		`SELECT id, reference, name, description, category, price_cents, tax_rate_percent, stock FROM products WHERE id = ?`, id,
+	).Scan(&p.ID, &p.Reference, &p.Name, &p.Description, &p.Category, &p.PriceCents, &p.TaxRatePercent, &p.Stock)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrProductNotFound
@@ -89,9 +105,15 @@ func (s *Store) CreateProduct(p *models.Product) error {
 	if p.TaxRatePercent == 0 {
 		p.TaxRatePercent = 20
 	}
+
+	reference, err := generateProductReference()
+	if err != nil {
+		return err
+	}
+
 	res, err := s.db.Exec(
-		`INSERT INTO products (name, description, category, price_cents, tax_rate_percent, stock) VALUES (?, ?, ?, ?, ?, ?)`,
-		p.Name, p.Description, p.Category, p.PriceCents, p.TaxRatePercent, p.Stock,
+		`INSERT INTO products (reference, name, description, category, price_cents, tax_rate_percent, stock) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		reference, p.Name, p.Description, p.Category, p.PriceCents, p.TaxRatePercent, p.Stock,
 	)
 	if err != nil {
 		return fmt.Errorf("store: échec de création du produit: %w", err)
@@ -101,6 +123,7 @@ func (s *Store) CreateProduct(p *models.Product) error {
 		return fmt.Errorf("store: échec de récupération de l'id créé: %w", err)
 	}
 	p.ID = id
+	p.Reference = reference
 	return nil
 }
 
