@@ -7,33 +7,38 @@ import (
 	"strconv"
 	"strings"
 
-	"ecommerce-cli/internal/apiclient"
+	"ecommerce-cli/internal/auth"
 	"ecommerce-cli/internal/models"
+	"ecommerce-cli/internal/store"
 )
 
-// NOTE: ui/admin/model.go est prévu pour un écran Bubble Tea, mais cette
-// dépendance n'est pas encore présente dans go.mod. Ce main.go propose donc
-// un menu texte fonctionnel qui consomme la même API HTTP, en attendant
-// l'implémentation de la TUI.
+// Application 100% CLI : aucun serveur, aucun réseau. Toutes les opérations
+// passent directement par internal/store (accès à la base SQLite locale).
 func main() {
-	baseURL := os.Getenv("API_URL")
-	if baseURL == "" {
-		baseURL = "http://localhost:8080"
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "ecommerce.db"
 	}
 
-	c := apiclient.New(baseURL)
+	s, err := store.New(dbPath)
+	if err != nil {
+		fmt.Println("Erreur d'ouverture de la base:", err)
+		os.Exit(1)
+	}
+	defer s.Close()
+
 	scanner := bufio.NewScanner(os.Stdin)
 
 	fmt.Print("Email admin: ")
 	scanner.Scan()
-	email := strings.TrimSpace(scanner.Text())
+	email := strings.TrimSpace(strings.ToLower(scanner.Text()))
 	fmt.Print("Mot de passe: ")
 	scanner.Scan()
 	password := strings.TrimSpace(scanner.Text())
 
-	user, err := c.Login(email, password)
-	if err != nil {
-		fmt.Println("Erreur de connexion:", err)
+	user, err := s.GetUserByEmail(email)
+	if err != nil || !auth.CheckPassword(user.PasswordHash, password) {
+		fmt.Println("Identifiants invalides.")
 		os.Exit(1)
 	}
 	if !user.IsAdmin {
@@ -56,15 +61,14 @@ func main() {
 		}
 		switch strings.TrimSpace(scanner.Text()) {
 		case "1":
-			listProducts(c)
+			listProducts(s)
 		case "2":
-			addProduct(c, scanner)
+			addProduct(s, scanner)
 		case "3":
-			deleteProduct(c, scanner)
+			deleteProduct(s, scanner)
 		case "4":
-			listAllOrders(c)
+			listAllOrders(s)
 		case "5":
-			_ = c.Logout()
 			return
 		default:
 			fmt.Println("Choix invalide")
@@ -72,8 +76,8 @@ func main() {
 	}
 }
 
-func listProducts(c *apiclient.Client) {
-	products, err := c.ListProducts()
+func listProducts(s *store.Store) {
+	products, err := s.ListProducts()
 	if err != nil {
 		fmt.Println("Erreur:", err)
 		return
@@ -83,7 +87,7 @@ func listProducts(c *apiclient.Client) {
 	}
 }
 
-func addProduct(c *apiclient.Client, scanner *bufio.Scanner) {
+func addProduct(s *store.Store, scanner *bufio.Scanner) {
 	fmt.Print("Nom: ")
 	scanner.Scan()
 	name := strings.TrimSpace(scanner.Text())
@@ -112,22 +116,21 @@ func addProduct(c *apiclient.Client, scanner *bufio.Scanner) {
 		return
 	}
 
-	p := models.Product{
+	p := &models.Product{
 		Name:        name,
 		Description: description,
 		Category:    category,
 		PriceCents:  int64(priceEuros * 100),
 		Stock:       stock,
 	}
-	created, err := c.CreateProduct(p)
-	if err != nil {
+	if err := s.CreateProduct(p); err != nil {
 		fmt.Println("Erreur:", err)
 		return
 	}
-	fmt.Printf("Produit créé: #%d %s\n", created.ID, created.Name)
+	fmt.Printf("Produit créé: #%d %s\n", p.ID, p.Name)
 }
 
-func deleteProduct(c *apiclient.Client, scanner *bufio.Scanner) {
+func deleteProduct(s *store.Store, scanner *bufio.Scanner) {
 	fmt.Print("ID du produit à supprimer: ")
 	scanner.Scan()
 	id, err := strconv.ParseInt(strings.TrimSpace(scanner.Text()), 10, 64)
@@ -135,15 +138,15 @@ func deleteProduct(c *apiclient.Client, scanner *bufio.Scanner) {
 		fmt.Println("ID invalide")
 		return
 	}
-	if err := c.DeleteProduct(id); err != nil {
+	if err := s.DeleteProduct(id); err != nil {
 		fmt.Println("Erreur:", err)
 		return
 	}
 	fmt.Println("Produit supprimé.")
 }
 
-func listAllOrders(c *apiclient.Client) {
-	orders, err := c.ListAllOrders()
+func listAllOrders(s *store.Store) {
+	orders, err := s.ListAllOrders()
 	if err != nil {
 		fmt.Println("Erreur:", err)
 		return

@@ -21,6 +21,12 @@ GOPATH/
 .env
 .env.*
 
+# Base de données locale SQLite (générée au lancement, ne doit pas être versionnée)
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
 # IDE / OS
 .DS_Store
 .idea/
