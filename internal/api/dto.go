@@ -1,8 +1,5 @@
-// Package api définit les structures JSON partagées entre le serveur HTTP
-// (internal/httpserver) et le client HTTP utilisé par les CLI (internal/apiclient).
 package api
 
-// ErrorResponse est le format d'erreur renvoyé par le serveur.
 type ErrorResponse struct {
 	Error string `json:"error"`
 }

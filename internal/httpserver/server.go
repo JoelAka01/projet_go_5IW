@@ -1,7 +1,3 @@
-// Package httpserver expose l'application e-commerce via une API HTTP en
-// JSON, construite uniquement avec net/http (aucun framework). Les CLI
-// client et admin communiquent avec le serveur via internal/apiclient au
-// lieu d'accéder directement à internal/store.
 package httpserver
 
 import (
@@ -65,8 +61,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /admin/users/{id}/confirm", s.requireAdmin(s.handleConfirmUser))
 	s.mux.HandleFunc("DELETE /admin/users/{id}", s.requireAdmin(s.handleDeleteUser))
 }
-
-// --- helpers ---
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -184,8 +178,6 @@ func (s *Server) createSessionToken(ctx context.Context, userID int64) (string, 
 	return token, nil
 }
 
-// --- auth handlers ---
-
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	var req api.AuthRequest
 	if err := decodeJSON(r, &req); err != nil {
@@ -234,8 +226,6 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, api.AuthResponse{Token: token, User: userToDTO(u)})
 }
-
-// --- product handlers ---
 
 func (s *Server) handleListProducts(w http.ResponseWriter, r *http.Request) {
 	products, err := s.store.ListProducts()
@@ -297,8 +287,6 @@ func (s *Server) handleDeleteProduct(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusNoContent, nil)
 }
-
-// --- cart handlers ---
 
 func (s *Server) handleGetCart(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r)
@@ -446,8 +434,6 @@ func (s *Server) handleCheckout(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// --- order handlers ---
-
 func (s *Server) handleListMyOrders(w http.ResponseWriter, r *http.Request) {
 	user := userFromContext(r)
 	orders, err := s.store.ListOrdersByUser(user.ID)
@@ -540,8 +526,6 @@ func (s *Server) handleCreateOrderForUser(w http.ResponseWriter, r *http.Request
 	}
 	writeJSON(w, http.StatusCreated, orderToDTO(*order))
 }
-
-// --- user handlers ---
 
 func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 	users, err := s.store.ListUsers()

@@ -6,6 +6,13 @@
 *.dll
 *.so
 *.dylib
+/client
+/admin
+/server
+/seed
+
+# Logs
+*.log
 
 # Go build/test artifacts
 *.test
@@ -30,6 +37,7 @@ GOPATH/
 # IDE / OS
 .DS_Store
 .idea/
+.vscode/
 *.swp
 
 # Local dev overrides

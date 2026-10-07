@@ -79,13 +79,44 @@ SERVER_ADDR=http://localhost:9090 go run ./cmd/admin
 
 ## Lancer le projet avec Docker
 
-Le `compose.yml` fourni monte le code source dans un conteneur Go et ouvre un shell interactif :
+Le `compose.yml` fourni monte le code source dans un conteneur Go. Le
+serveur et les CLI doivent impérativement tourner **dans le même conteneur**
+pour partager le même réseau (`localhost`) : chaque `docker compose run`
+crée un nouveau conteneur isolé, donc lancer le serveur avec `run` dans un
+terminal et le client avec `run` dans un autre terminal ne fonctionnera pas
+(`connection refused`).
+
+1. Démarrer un conteneur persistant en arrière-plan :
+
+   ```bash
+   docker compose up -d
+   ```
+
+2. Ouvrir un premier shell dans ce conteneur et lancer le serveur :
+
+   ```bash
+   docker compose exec go sh
+   go run ./cmd/server
+   ```
+
+3. Dans un **autre terminal**, rejoindre le **même** conteneur (avec `exec`,
+   pas `run`) pour lancer le client ou l'admin :
+
+   ```bash
+   docker compose exec go sh
+   go run ./cmd/client
+   ```
+
+   ```bash
+   docker compose exec go sh
+   go run ./cmd/admin
+   ```
+
+Pour arrêter le conteneur :
 
 ```bash
-docker compose run --rm go sh
+docker compose down
 ```
-
-Une fois dans le conteneur, vous pouvez utiliser les mêmes commandes que ci-dessus (`go run ./cmd/server`, puis `go run ./cmd/client` / `go run ./cmd/admin` dans d'autres sessions).
 
 ## Tests
 

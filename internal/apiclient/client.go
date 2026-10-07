@@ -1,6 +1,3 @@
-// Package apiclient fournit un client HTTP (net/http côté transport) utilisé
-// par les CLI client et admin pour communiquer avec cmd/server, au lieu
-// d'accéder directement à la base de données.
 package apiclient
 
 import (
@@ -15,7 +12,6 @@ import (
 	"ecommerce-cli/internal/api"
 )
 
-// APIError représente une erreur retournée par le serveur HTTP.
 type APIError struct {
 	StatusCode int
 	Message    string

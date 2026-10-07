@@ -1,5 +1,3 @@
-// Commande du serveur HTTP : expose l'API utilisée par les CLI client et
-// admin. Implémentée uniquement avec net/http (aucun framework).
 package main
 
 import (
