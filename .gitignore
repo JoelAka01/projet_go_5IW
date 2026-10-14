@@ -47,3 +47,6 @@ docker-compose.override.yml
 .ash_history
 .bash_history
 .config/
+
+# Clé d'hôte SSH générée par cmd/ssh-server (clé privée : ne jamais versionner)
+.ssh/

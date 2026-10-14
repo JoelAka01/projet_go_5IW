@@ -21,6 +21,12 @@ func Run(serverAddr string) error {
 	return err
 }
 
+// NewModel crée un nouveau modèle racine indépendant, prêt à être passé à un
+// tea.Program. Utilisé par cmd/ssh-server pour instancier un modèle par session.
+func NewModel(serverAddr string) tea.Model {
+	return newModel(serverAddr)
+}
+
 type screen int
 
 const (
