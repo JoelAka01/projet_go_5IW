@@ -1,10 +1,9 @@
 package main
 
 import (
+	"ecommerce-cli/ui/admin"
 	"fmt"
 	"os"
-
-	"ecommerce-cli/ui/admin"
 )
 
 func main() {

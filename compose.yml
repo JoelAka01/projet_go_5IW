@@ -5,5 +5,8 @@ services:
     working_dir: /home/go
     tty: true
     stdin_open: true
+    ports:
+      - "2222:2222"
+      - "2223:2223"
     volumes:
       - .:/home/go

@@ -58,16 +58,19 @@ La persistance se fait via **SQLite** (`modernc.org/sqlite`), aucune base extern
    ```
 
 5. Pour l'interface admin (dans un autre terminal également) :
+
    ```bash
    go run ./cmd/admin
    ```
 
 ### Variables d'environnement
 
-| Variable      | Utilisé par                                 | Défaut                                            | Description                      |
-| ------------- | ------------------------------------------- | ------------------------------------------------- | -------------------------------- |
-| `DB_PATH`     | `server`, `seed`                            | `ecommerce.db`                                    | Chemin du fichier de base SQLite |
-| `SERVER_ADDR` | `server` (écoute), `client`/`admin` (cible) | `:8080` (serveur) / `http://localhost:8080` (CLI) | Adresse du serveur HTTP          |
+| Variable          | Utilisé par                                              | Défaut                                                | Description                                |
+| ----------------- | -------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------ |
+| `DB_PATH`         | `server`, `seed`                                         | `ecommerce.db`                                        | Chemin du fichier de base SQLite           |
+| `SERVER_ADDR`     | `server` (écoute), `client`/`admin`/`ssh-server` (cible) | `:8080` (serveur) / `http://localhost:8080` (CLI/SSH) | Adresse du serveur HTTP                    |
+| `SSH_CLIENT_ADDR` | `ssh-server`                                             | `:2222`                                               | Adresse d'écoute SSH de l'interface client |
+| `SSH_ADMIN_ADDR`  | `ssh-server`                                             | `:2223`                                               | Adresse d'écoute SSH de l'interface admin  |
 
 Exemple (serveur sur un port personnalisé, CLI pointant dessus) :
 
@@ -75,6 +78,38 @@ Exemple (serveur sur un port personnalisé, CLI pointant dessus) :
 SERVER_ADDR=:9090 go run ./cmd/server
 SERVER_ADDR=http://localhost:9090 go run ./cmd/client
 SERVER_ADDR=http://localhost:9090 go run ./cmd/admin
+```
+
+## Accès via SSH (wish)
+
+1. Le serveur HTTP (`cmd/server`) doit être démarré au préalable (voir
+   ci-dessus).
+
+2. Démarrer le serveur SSH :
+
+   ```bash
+   go run ./cmd/ssh-server
+   ```
+
+   Par défaut, il écoute sur `:2222` (interface client) et `:2223`
+   (interface admin), et cible l'API sur `http://localhost:8080`. Une clé
+   d'hôte SSH est générée automatiquement au premier lancement dans
+   `.ssh/id_ed25519` (dossier ignoré par git).
+
+3. Se connecter avec n'importe quel client SSH :
+
+   ```bash
+   ssh -p 2222 localhost   # interface client
+   ssh -p 2223 localhost   # interface admin
+   ```
+
+Options disponibles (flags, avec variables d'environnement équivalentes) :
+
+```bash
+go run ./cmd/ssh-server \
+  --api http://localhost:8080 \
+  --client-addr :2222 \
+  --admin-addr :2223
 ```
 
 ## Lancer le projet avec Docker
@@ -112,11 +147,75 @@ terminal et le client avec `run` dans un autre terminal ne fonctionnera pas
    go run ./cmd/admin
    ```
 
+4. (Optionnel) Pour exposer les TUI via SSH depuis le conteneur, ouvrir un
+   autre shell dans le **même** conteneur :
+
+   ```bash
+   docker compose exec go sh
+   go run ./cmd/ssh-server
+   ```
+
 Pour arrêter le conteneur :
 
 ```bash
 docker compose down
 ```
+
+## Image de production (Dockerfile.prod)
+
+`Dockerfile` et `compose.yml` sont destinés au **développement** (montage du
+code source, compilation à la volée avec `go run`). Pour un déploiement
+(Azure, VM, etc.), utiliser `Dockerfile.prod` : un build multi-stage qui
+compile des binaires statiques (`server`, `ssh-server`, `seed`) et produit
+une image Alpine minimale, sans dépendre du code source monté.
+
+Construire et tester l'image en local :
+
+```bash
+docker build -f Dockerfile.prod -t ecommerce-cli:prod .
+docker compose -f compose.prod.yml up -d
+```
+
+Le conteneur lance `cmd/server` (API HTTP sur `:8080`) et `cmd/ssh-server`
+(SSH sur `:2222`/`:2223`) via `docker/entrypoint.sh` ; si l'un des deux
+process s'arrête, le conteneur s'arrête (pour que l'orchestrateur le
+redémarre). La base SQLite est persistée dans un volume (`/home/app/data`),
+de même que la clé d'hôte SSH (`/home/app/.ssh`) afin de ne pas regénérer
+une nouvelle clé (et donc une alerte "host key changed" côté clients) à
+chaque redémarrage du conteneur.
+
+Variables d'environnement spécifiques à cette image :
+
+| Variable  | Défaut                  | Description                                                                                                                         |
+| --------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `API_URL` | `http://127.0.0.1:8080` | URL interne utilisée par `ssh-server` pour joindre l'API (distincte de `SERVER_ADDR`, qui reste l'adresse d'écoute de `cmd/server`) |
+
+### Déployer sur Azure
+
+Cette image Docker peut être hébergée sur **Azure Container Apps** ou
+**Azure Container Instances** (le SSH nécessite un ingress TCP, pas
+seulement HTTP) :
+
+1. Pousser l'image vers un registre (Azure Container Registry) :
+
+   ```bash
+   az acr create --name <registry> --resource-group <rg> --sku Basic
+   az acr build --registry <registry> --image ecommerce-cli:prod -f Dockerfile.prod .
+   ```
+
+2. Déployer un Container App avec :
+   - un ingress TCP exposant les ports `2222` et `2223` (SSH),
+   - le port `8080` non exposé publiquement (interne au conteneur),
+   - un stockage persistant (Azure Files) monté sur `/home/app/data` pour
+     que la base SQLite survive aux redémarrages/mises à l'échelle,
+   - les variables d'environnement `DB_PATH`, `SERVER_ADDR`, `API_URL`,
+     `SSH_CLIENT_ADDR`, `SSH_ADMIN_ADDR` si les valeurs par défaut ne
+     conviennent pas.
+
+Alternative plus simple pour un usage ponctuel/démo : une **Azure VM**
+(Ubuntu) avec Docker installé, sur laquelle on exécute simplement
+`docker compose -f compose.prod.yml up -d`, en ouvrant les ports `2222` et
+`2223` dans le groupe de sécurité réseau (NSG).
 
 ## Tests
 

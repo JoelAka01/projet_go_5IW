@@ -10,6 +10,8 @@
 /admin
 /server
 /seed
+/ssh-server
+/Sujet.pdf
 
 # Logs
 *.log

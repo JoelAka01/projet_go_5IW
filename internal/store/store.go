@@ -2,14 +2,15 @@ package store
 
 import (
 	"database/sql"
+	_ "embed"
 	"fmt"
-	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 
 	_ "modernc.org/sqlite"
 )
+
+//go:embed schema.sql
+var schemaSQL string
 
 type Store struct {
 	db *sql.DB
@@ -26,23 +27,12 @@ func New(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("store: échec de l'activation des clés étrangères: %w", err)
 	}
 
-	schema, err := os.ReadFile(schemaPath())
-	if err != nil {
-		db.Close()
-		return nil, fmt.Errorf("store: échec de lecture du schéma: %w", err)
-	}
-
-	if _, err := db.Exec(string(schema)); err != nil {
+	if _, err := db.Exec(schemaSQL); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("store: échec de l'exécution du schéma: %w", err)
 	}
 
 	return &Store{db: db}, nil
-}
-
-func schemaPath() string {
-	_, thisFile, _, _ := runtime.Caller(0)
-	return filepath.Join(filepath.Dir(thisFile), "..", "..", "migrations", "schema.sql")
 }
 
 func (s *Store) Close() error {

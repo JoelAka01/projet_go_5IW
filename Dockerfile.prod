@@ -1,0 +1,41 @@
+FROM golang:1.27-alpine3.24 AS build
+
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/ssh-server ./cmd/ssh-server
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/seed ./cmd/seed
+
+FROM alpine:3.24
+
+RUN apk add --no-cache ca-certificates && \
+    addgroup -g 1000 app && \
+    adduser -h /home/app -G app -D -u 1000 app
+
+WORKDIR /home/app
+
+COPY --from=build /out/server /out/ssh-server /out/seed ./
+COPY docker/entrypoint.sh ./entrypoint.sh
+
+RUN chmod +x ./entrypoint.sh && \
+    mkdir -p /home/app/data /home/app/.ssh && \
+    chown -R app:app /home/app
+
+USER app
+
+ENV DB_PATH=/home/app/data/ecommerce.db \
+    SERVER_ADDR=:8080 \
+    API_URL=http://127.0.0.1:8080 \
+    SSH_CLIENT_ADDR=:2222 \
+    SSH_ADMIN_ADDR=:2223
+
+EXPOSE 8080 2222 2223
+
+VOLUME ["/home/app/data", "/home/app/.ssh"]
+
+ENTRYPOINT ["./entrypoint.sh"]

@@ -1,0 +1,23 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    image: ecommerce-cli:prod
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+      - "2222:2222"
+      - "2223:2223"
+    environment:
+      DB_PATH: /home/app/data/ecommerce.db
+      SERVER_ADDR: ":8080"
+      SSH_CLIENT_ADDR: ":2222"
+      SSH_ADMIN_ADDR: ":2223"
+    volumes:
+      - ecommerce-data:/home/app/data
+      - ecommerce-ssh-keys:/home/app/.ssh
+
+volumes:
+  ecommerce-data:
+  ecommerce-ssh-keys:

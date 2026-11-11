@@ -21,8 +21,6 @@ func Run(serverAddr string) error {
 	return err
 }
 
-// NewModel crée un nouveau modèle racine indépendant, prêt à être passé à un
-// tea.Program. Utilisé par cmd/ssh-server pour instancier un modèle par session.
 func NewModel(serverAddr string) tea.Model {
 	return newModel(serverAddr)
 }
@@ -176,8 +174,11 @@ func (m *model) buildAuthForm() *huh.Form {
 				Options(
 					huh.NewOption("Se connecter", "login"),
 					huh.NewOption("Créer un compte", "register"),
+					huh.NewOption("Quitter", "quit"),
 				).
 				Value(&m.authMode),
+		),
+		huh.NewGroup(
 			huh.NewInput().
 				Title("Email").
 				Value(&m.email).
@@ -197,7 +198,9 @@ func (m *model) buildAuthForm() *huh.Form {
 					}
 					return nil
 				}),
-		),
+		).WithHideFunc(func() bool {
+			return m.authMode == "quit"
+		}),
 	).WithWidth(60)
 }
 
@@ -311,6 +314,9 @@ func (m *model) updateAuth(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.authForm = f
 	}
 	if m.authForm.State == huh.StateCompleted {
+		if m.authMode == "quit" {
+			return m, tea.Quit
+		}
 		m.loading = true
 		email, password, mode := m.email, m.password, m.authMode
 		m.authForm = m.buildAuthForm()
